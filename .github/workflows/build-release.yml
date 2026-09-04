@@ -1,0 +1,207 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  metadata:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Resolve build metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./frontend/package.json').version")"
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Release tags must use semantic versioning, for example v0.3.0"
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$version" != "$package_version" ]]; then
+              echo "::error::Tag version $version does not match frontend/package.json version $package_version"
+              exit 1
+            fi
+          else
+            version="$package_version"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    name: Build macOS arm64 and amd64
+    needs: metadata
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_NUMBER: ${{ github.run_number }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Test Go packages
+        run: go test ./...
+
+      - name: Vet Go packages
+        run: go vet ./...
+
+      - name: Build macOS packages
+        env:
+          ARCHS: "arm64 amd64"
+          SKIP_FRONTEND_BUILD: "1"
+        run: ./scripts/build-macos.sh
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nblink-Companion-${{ needs.metadata.outputs.version }}-macos
+          path: |
+            dist/Nblink-Companion-${{ needs.metadata.outputs.version }}-macos-*.zip
+            dist/Nblink-Companion-${{ needs.metadata.outputs.version }}-macos-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows:
+    name: Build Windows amd64
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_NUMBER: ${{ github.run_number }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Test and build frontend
+        shell: pwsh
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Test Go packages
+        shell: pwsh
+        run: go test ./...
+
+      - name: Vet Go packages
+        shell: pwsh
+        run: go vet ./...
+
+      - name: Build Windows package
+        shell: pwsh
+        env:
+          SKIP_FRONTEND_BUILD: "1"
+        run: .\scripts\build-windows.ps1
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nblink-Companion-${{ needs.metadata.outputs.version }}-windows-amd64
+          path: |
+            dist/windows/amd64/*.exe
+            dist/windows/amd64/*.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    needs:
+      - metadata
+      - build-macos
+      - build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: Nblink-Companion-${{ needs.metadata.outputs.version }}-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Nblink Companion $RELEASE_VERSION"
+          fi

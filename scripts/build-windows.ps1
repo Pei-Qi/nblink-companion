@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
-$Version = if ($env:VERSION) { $env:VERSION } else { "0.3.0" }
+$Package = Get-Content (Join-Path $RootDir "frontend\package.json") -Raw | ConvertFrom-Json
+$Version = if ($env:VERSION) { $env:VERSION } else { $Package.version }
 $BuildNumber = if ($env:BUILD_NUMBER) { $env:BUILD_NUMBER } else { "1" }
 $Arch = if ($env:GOARCH) { $env:GOARCH } else { "amd64" }
 $WailsTool = "github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16"
@@ -12,6 +13,7 @@ $ManifestPath = Join-Path $BuildDir "nblink-companion.exe.manifest"
 $InfoPath = Join-Path $BuildDir "info.json"
 $SysoPath = Join-Path $RootDir "cmd\nblink-companion\rsrc_windows_$Arch.syso"
 $ReleaseExe = Join-Path $BuildDir "Nblink-Companion-$Version-windows-$Arch.exe"
+$ChecksumPath = "$ReleaseExe.sha256"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 $env:GOOS = "windows"
@@ -74,7 +76,7 @@ try {
     } | ConvertTo-Json -Depth 4
     [System.IO.File]::WriteAllText($InfoPath, $Info, $Utf8NoBom)
 
-    Remove-Item -Force -ErrorAction SilentlyContinue $SysoPath, $ReleaseExe
+    Remove-Item -Force -ErrorAction SilentlyContinue $SysoPath, $ReleaseExe, $ChecksumPath
     go run $WailsTool generate syso `
         -arch $Arch `
         -icon $IconIco `
@@ -88,7 +90,10 @@ try {
     if (-not (Test-Path $ReleaseExe)) {
         throw "Go build did not create $ReleaseExe"
     }
+    $Hash = (Get-FileHash $ReleaseExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$Hash  $(Split-Path $ReleaseExe -Leaf)" | Set-Content $ChecksumPath -Encoding ascii
     Write-Host "Created $ReleaseExe"
+    Write-Host "Created $ChecksumPath"
 }
 finally {
     Remove-Item -Force -ErrorAction SilentlyContinue $SysoPath

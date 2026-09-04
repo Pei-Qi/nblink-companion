@@ -8,17 +8,20 @@ ASSET_DIR="$DIST_DIR/assets"
 EXECUTABLE_NAME="nblink-companion"
 APP_NAME="Nblink Companion.app"
 ICON_NAME="NblinkCompanion.icns"
-VERSION="${VERSION:-0.3.0}"
+VERSION="${VERSION:-$(cd "$ROOT_DIR" && node -p "require('./frontend/package.json').version")}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
+ARCHS="${ARCHS:-arm64 amd64}"
 export GOCACHE="${GOCACHE:-$DIST_DIR/.gocache}"
 
 mkdir -p "$MACOS_DIR" "$ASSET_DIR"
 
-(
-  cd "$ROOT_DIR/frontend"
-  npm ci
-  npm run build
-)
+if [[ "${SKIP_FRONTEND_BUILD:-}" != "1" ]]; then
+  (
+    cd "$ROOT_DIR/frontend"
+    npm ci
+    npm run build
+  )
+fi
 
 go run "$ROOT_DIR/cmd/iconbuilder" \
   -svg "$ROOT_DIR/assets/app-icon.svg" \
@@ -30,11 +33,21 @@ go run "$ROOT_DIR/cmd/iconbuilder" \
   -png "$ROOT_DIR/assets/tray-icon.png" \
   -png-size 64
 
-for arch in arm64 amd64; do
+read -r -a arch_list <<<"$ARCHS"
+for arch in "${arch_list[@]}"; do
+  case "$arch" in
+    arm64 | amd64) ;;
+    *)
+      printf 'Unsupported macOS architecture: %s\n' "$arch" >&2
+      exit 1
+      ;;
+  esac
+
   ARCH_DIR="$MACOS_DIR/$arch"
   APP_DIR="$ARCH_DIR/$APP_NAME"
   ZIP_PATH="$DIST_DIR/Nblink-Companion-$VERSION-macos-$arch.zip"
-  rm -rf "$APP_DIR" "$ZIP_PATH"
+  CHECKSUM_PATH="$ZIP_PATH.sha256"
+  rm -rf "$APP_DIR" "$ZIP_PATH" "$CHECKSUM_PATH"
   mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
   clang_arch="$arch"
@@ -90,6 +103,9 @@ PLIST
   file "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME"
   codesign --verify --deep --strict "$APP_DIR"
   ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ZIP_PATH"
+  checksum="$(openssl dgst -sha256 "$ZIP_PATH" | awk '{print $NF}')"
+  printf '%s  %s\n' "$checksum" "$(basename "$ZIP_PATH")" >"$CHECKSUM_PATH"
   printf 'Created %s\n' "$APP_DIR"
   printf 'Created %s\n' "$ZIP_PATH"
+  printf 'Created %s\n' "$CHECKSUM_PATH"
 done

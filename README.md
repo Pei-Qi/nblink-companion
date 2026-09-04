@@ -113,12 +113,23 @@ VERSION=0.3.0 BUILD_NUMBER=1 ./scripts/build-macos.sh
 dist\windows\amd64\Nblink-Companion-0.3.0-windows-amd64.exe
 ```
 
-## GitHub Actions 自动打包
+## GitHub Actions 自动构建与发布
 
-仓库内置 `.github/workflows/windows-build.yml`，使用 GitHub 托管的 Windows Runner 完成前端测试、Go 测试和 Windows `amd64` 打包：
+仓库内置 `.github/workflows/build-release.yml`，自动执行前端测试、Go 测试和静态检查，并构建当前支持的全部发布平台：
 
-- 推送到 `main`、创建针对 `main` 的 Pull Request，或在 Actions 页面手动运行工作流时，会生成可下载的 Windows Artifact。
-- 推送符合 `v主版本.次版本.修订版本` 格式的标签时，会在构建成功后自动创建 GitHub Release，并附带 `.exe` 和 SHA-256 校验文件。
+- macOS arm64：`Nblink-Companion-版本-macos-arm64.zip`
+- macOS amd64：`Nblink-Companion-版本-macos-amd64.zip`
+- Windows amd64：`Nblink-Companion-版本-windows-amd64.exe`
+- 每个发布文件同时生成对应的 SHA-256 校验文件。
+
+触发条件：
+
+- 推送到 `main`：测试并构建全部平台，上传保留 30 天的 Actions Artifact，不创建 Release。
+- 创建或更新针对 `main` 的 Pull Request：测试并构建全部平台，不创建 Release。
+- 在 Actions 页面手动运行：测试并构建全部平台；选择已有发布标签运行时也会执行发布步骤。
+- 推送 `v*` 语义化版本标签：全部平台构建成功后，自动创建 GitHub Release 并上传所有安装包和校验文件。
+
+标签版本必须与 `frontend/package.json` 中的版本一致；任意测试或平台构建失败都不会发布。
 
 发布当前版本：
 
@@ -127,7 +138,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-自动生成的 Windows 程序当前未进行代码签名。托盘、WebView2、登录启动、RDP/VNC 拉起和 ICO 显示仍需在 Windows 实机完成最终验收。
+自动生成的 macOS 程序使用临时签名，未进行 Apple Developer ID 签名和公证；Windows 程序当前未进行代码签名。Intel macOS 和 Windows 平台功能仍需在对应实机完成最终验收。
 
 ## 图标资源
 
