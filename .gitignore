@@ -1,0 +1,28 @@
+.DS_Store
+.idea/
+.vscode/
+
+# Frontend dependencies and generated assets
+frontend/node_modules/
+frontend/dist/
+
+# Build, test, and release outputs
+dist/
+output/
+coverage/
+*.log
+*.exe
+*.syso
+
+# Local application data and credentials
+.env
+.env.*
+**/config.json
+**/user_service.db
+*.pem
+*.pfx
+*.p12
+*.key
+
+# Local Go build output
+/nblink-companion
