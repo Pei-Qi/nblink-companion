@@ -11,7 +11,21 @@ ICON_NAME="NblinkCompanion.icns"
 VERSION="${VERSION:-$(cd "$ROOT_DIR" && node -p "require('./frontend/package.json').version")}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 ARCHS="${ARCHS:-arm64 amd64}"
+SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
+REQUIRE_NOTARIZATION="${REQUIRE_MACOS_NOTARIZATION:-0}"
 export GOCACHE="${GOCACHE:-$DIST_DIR/.gocache}"
+
+notarization_enabled=0
+if [[ -n "${MACOS_NOTARY_PROFILE:-}" ]]; then
+  notarization_enabled=1
+elif [[ -n "${MACOS_NOTARY_APPLE_ID:-}" && -n "${MACOS_NOTARY_TEAM_ID:-}" && -n "${MACOS_NOTARY_PASSWORD:-}" ]]; then
+  notarization_enabled=1
+fi
+
+if [[ "$REQUIRE_NOTARIZATION" == "1" && ( "$SIGN_IDENTITY" == "-" || "$notarization_enabled" != "1" ) ]]; then
+  printf 'A release build requires MACOS_SIGN_IDENTITY and notarization credentials.\n' >&2
+  exit 1
+fi
 
 mkdir -p "$MACOS_DIR" "$ASSET_DIR"
 
@@ -99,10 +113,36 @@ for arch in "${arch_list[@]}"; do
 PLIST
 
   plutil -lint "$APP_DIR/Contents/Info.plist"
-  codesign --force --deep --sign - "$APP_DIR"
+  codesign_args=(--force --deep --sign "$SIGN_IDENTITY")
+  if [[ "$SIGN_IDENTITY" != "-" ]]; then
+    codesign_args+=(--options runtime --timestamp)
+  fi
+  codesign "${codesign_args[@]}" "$APP_DIR"
   file "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME"
   codesign --verify --deep --strict "$APP_DIR"
   ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ZIP_PATH"
+
+  if [[ "$notarization_enabled" == "1" ]]; then
+    if [[ "$SIGN_IDENTITY" == "-" ]]; then
+      printf 'Notarization requires a Developer ID Application signing identity.\n' >&2
+      exit 1
+    fi
+    if [[ -n "${MACOS_NOTARY_PROFILE:-}" ]]; then
+      xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    else
+      xcrun notarytool submit "$ZIP_PATH" \
+        --apple-id "$MACOS_NOTARY_APPLE_ID" \
+        --team-id "$MACOS_NOTARY_TEAM_ID" \
+        --password "$MACOS_NOTARY_PASSWORD" \
+        --wait
+    fi
+    xcrun stapler staple "$APP_DIR"
+    xcrun stapler validate "$APP_DIR"
+    spctl --assess --type execute --verbose=2 "$APP_DIR"
+    rm -f "$ZIP_PATH"
+    ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ZIP_PATH"
+  fi
+
   checksum="$(openssl dgst -sha256 "$ZIP_PATH" | awk '{print $NF}')"
   printf '%s  %s\n' "$checksum" "$(basename "$ZIP_PATH")" >"$CHECKSUM_PATH"
   printf 'Created %s\n' "$APP_DIR"

@@ -157,7 +157,7 @@ func testController(t *testing.T, provider *fakeProvider, ruleManager *fakeManag
 	if err := store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
-	controller, start, cleanup := New(nil, store, provider, ruleManager, platform, cfg, "0.3.0", "")
+	controller, start, cleanup := New(nil, store, provider, ruleManager, platform, cfg, "0.3.1", "")
 	t.Cleanup(cleanup)
 	start()
 	return controller
@@ -256,6 +256,58 @@ func TestUpdateRuleValidatesAndPersists(t *testing.T) {
 	rule, ok := controller.ruleByKey("key")
 	if !ok || rule.ListenPort != port || rule.Kind != model.ServiceKindWeb || rule.WebScheme != "https" {
 		t.Fatalf("unexpected rule: %#v", rule)
+	}
+}
+
+func TestSaveSettingsDoesNotPersistWhenAutostartFails(t *testing.T) {
+	cfg := config.Default()
+	controller := testController(t, &fakeProvider{}, newFakeManager(), &fakePlatform{}, cfg)
+	controller.setAutostart = func(bool, string) error { return errors.New("autostart failed") }
+
+	input := SettingsInput{
+		LaunchAtLogin: true, StartFavoritesOnLaunch: true, RefreshMinutes: 10, ThemeMode: config.ThemeDark,
+	}
+	if err := controller.SaveSettings(input); err == nil {
+		t.Fatal("expected autostart failure")
+	}
+	if got := controller.Bootstrap().Settings; got.LaunchAtLogin || got.RefreshMinutes != cfg.Settings.RefreshMinutes {
+		t.Fatalf("settings changed after failed autostart: %#v", got)
+	}
+	stored, err := controller.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Settings.LaunchAtLogin || stored.Settings.RefreshMinutes != cfg.Settings.RefreshMinutes {
+		t.Fatalf("persisted settings changed after failed autostart: %#v", stored.Settings)
+	}
+}
+
+func TestSaveSettingsPersistsAfterAutostartSucceeds(t *testing.T) {
+	controller := testController(t, &fakeProvider{}, newFakeManager(), &fakePlatform{}, config.Default())
+	var enabled bool
+	controller.setAutostart = func(value bool, executable string) error {
+		enabled = value
+		if executable == "" {
+			t.Fatal("expected executable path")
+		}
+		return nil
+	}
+
+	input := SettingsInput{
+		LaunchAtLogin: true, StartFavoritesOnLaunch: false, RefreshMinutes: 10, ThemeMode: config.ThemeDark,
+	}
+	if err := controller.SaveSettings(input); err != nil {
+		t.Fatal(err)
+	}
+	if !enabled {
+		t.Fatal("expected autostart to be enabled")
+	}
+	stored, err := controller.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Settings.LaunchAtLogin || stored.Settings.RefreshMinutes != 10 || stored.Settings.ThemeMode != config.ThemeDark {
+		t.Fatalf("unexpected persisted settings: %#v", stored.Settings)
 	}
 }
 

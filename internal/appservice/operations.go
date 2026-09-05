@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/nblink-companion/internal/autostart"
 	"github.com/local/nblink-companion/internal/config"
 	"github.com/local/nblink-companion/internal/launcher"
 	"github.com/local/nblink-companion/internal/logx"
@@ -162,18 +161,25 @@ func (c *Controller) SaveSettings(input SettingsInput) error {
 		CredentialFile: strings.TrimSpace(input.CredentialFile), RDPLauncher: strings.TrimSpace(input.RDPLauncher),
 		VNCLauncher: strings.TrimSpace(input.VNCLauncher), RefreshMinutes: input.RefreshMinutes, ThemeMode: theme,
 	}
+	c.mu.RLock()
+	previous := c.cfg.Settings
+	c.mu.RUnlock()
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := c.setAutostart(settings.LaunchAtLogin, executable); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	c.cfg.Settings = settings
 	cfg := c.configSnapshotLocked()
 	c.mu.Unlock()
 	if err := c.store.Save(cfg); err != nil {
-		return err
-	}
-	executable, err := os.Executable()
-	if err == nil {
-		err = autostart.Set(settings.LaunchAtLogin, executable)
-	}
-	if err != nil {
+		_ = c.setAutostart(previous.LaunchAtLogin, executable)
+		c.mu.Lock()
+		c.cfg.Settings = previous
+		c.mu.Unlock()
 		return err
 	}
 	c.provider.SetCredentialFile(settings.CredentialFile)

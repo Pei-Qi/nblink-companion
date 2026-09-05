@@ -2,7 +2,7 @@
 
 一个面向个人使用的 macOS/Windows 后台工具，为节点小宝“一键访问”服务提供稳定的本地端口。
 
-当前版本：`0.3.0`，开发基线日期：`2026-09-03`。
+当前版本：`0.3.1`，开发基线日期：`2026-09-05`。
 
 ## 技术栈
 
@@ -89,15 +89,40 @@ go test ./internal/proxy -run '^$' -bench . -benchmem
 ```text
 dist/macos/arm64/Nblink Companion.app
 dist/macos/amd64/Nblink Companion.app
-dist/Nblink-Companion-0.3.0-macos-arm64.zip
-dist/Nblink-Companion-0.3.0-macos-amd64.zip
+dist/Nblink-Companion-0.3.1-macos-arm64.zip
+dist/Nblink-Companion-0.3.1-macos-amd64.zip
 ```
 
 可以覆盖版本和构建号：
 
 ```bash
-VERSION=0.3.0 BUILD_NUMBER=1 ./scripts/build-macos.sh
+VERSION=0.3.1 BUILD_NUMBER=1 ./scripts/build-macos.sh
 ```
+
+具备 Apple Developer ID 后，可以选择启用正式签名和公证。脚本支持钥匙串公证配置，或 App Store Connect 专用密码：
+
+```bash
+MACOS_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)' \
+MACOS_NOTARY_PROFILE='nblink-notary' \
+REQUIRE_MACOS_NOTARIZATION=1 \
+./scripts/build-macos.sh
+```
+
+也可以使用 `MACOS_NOTARY_APPLE_ID`、`MACOS_NOTARY_TEAM_ID` 和 `MACOS_NOTARY_PASSWORD`。公证成功后脚本会把票据装订到 `.app`，执行 Gatekeeper 校验，再重新生成 ZIP。
+
+未配置 Developer ID 时，脚本和 GitHub Actions 会继续生成临时签名包，不阻止标签发布。用户从浏览器下载后，macOS 可能提示“无法验证开发者”或阻止首次打开，这是未公证应用的系统保护行为。
+
+### 未签名版本首次打开
+
+仅从本仓库的 GitHub Release 下载，并先核对同名 `.sha256` 文件。首次使用按以下步骤操作：
+
+1. 根据电脑处理器下载 `macos-arm64.zip` 或 `macos-amd64.zip`。
+2. 解压后把 `Nblink Companion.app` 拖到“应用程序”目录，不要直接在下载目录中运行。
+3. 在 Finder 的“应用程序”中找到应用，按住 Control 点击或右键点击，选择“打开”。
+4. 在系统确认窗口中再次选择“打开”。完成一次后，后续可以正常启动。
+5. 如果没有出现“打开”按钮，进入“系统设置 → 隐私与安全性”，在安全提示区域选择“仍要打开”，然后再次确认。
+
+不要关闭 macOS 全局安全检查，也不要运行来源不明的解除隔离命令。无法核对下载来源或 SHA-256 时不要打开应用。
 
 ## Windows 打包
 
@@ -110,7 +135,7 @@ VERSION=0.3.0 BUILD_NUMBER=1 ./scripts/build-macos.sh
 脚本执行前端生产构建，通过固定版本的 Wails v3 工具生成 Windows `.syso` 资源，再使用 Go 生成无控制台窗口的 `.exe`。默认输出：
 
 ```text
-dist\windows\amd64\Nblink-Companion-0.3.0-windows-amd64.exe
+dist\windows\amd64\Nblink-Companion-0.3.1-windows-amd64.exe
 ```
 
 ## GitHub Actions 自动构建与发布
@@ -134,11 +159,20 @@ dist\windows\amd64\Nblink-Companion-0.3.0-windows-amd64.exe
 发布当前版本：
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
-自动生成的 macOS 程序使用临时签名，未进行 Apple Developer ID 签名和公证；Windows 程序当前未进行代码签名。Intel macOS 和 Windows 平台功能仍需在对应实机完成最终验收。
+标签发布不强制要求 Developer ID。未配置证书时，macOS Release 使用临时签名并正常发布，用户需要按上面的“未签名版本首次打开”步骤操作；配置完整证书和公证凭据后，流程会自动切换为正式签名、公证和票据装订。Windows 程序当前未进行代码签名。Intel macOS 和 Windows 平台功能仍需在对应实机完成最终验收。
+
+需要启用正式签名和公证时，再配置以下 GitHub Actions Secrets；暂不配置不会阻止发布：
+
+- `MACOS_CERTIFICATE_P12_BASE64`
+- `MACOS_CERTIFICATE_PASSWORD`
+- `MACOS_SIGN_IDENTITY`
+- `MACOS_NOTARY_APPLE_ID`
+- `MACOS_NOTARY_TEAM_ID`
+- `MACOS_NOTARY_PASSWORD`
 
 ## 图标资源
 
@@ -160,7 +194,8 @@ go run ./cmd/iconbuilder -svg ./assets/tray-icon.svg -png ./assets/tray-icon.png
 - 当前只实现 TCP 固定端口，不转发 RDP 的可选 UDP 通道。
 - 节点小宝或底层隧道中断时，已经建立的连接无法迁移；恢复后新连接会使用重建的映射。
 - 远程唤醒依赖节点小宝未公开接口。请求格式有模拟测试覆盖，但节点小宝升级后仍可能需要更新适配器。
-- 本项目不包含 Apple Developer ID 签名、公证、自动升级或遥测。
+- Apple Developer ID 证书和公证账号由发布者提供，仓库不保存任何证书或密码。
+- 本项目不包含自动升级或遥测。
 - Intel macOS 包可在 Apple Silicon 设备完成架构和静态检查，但最终启动验收仍应在 Intel Mac 上执行。
 
 ## 验收

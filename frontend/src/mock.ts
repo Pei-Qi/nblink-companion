@@ -42,7 +42,7 @@ export function createMockSnapshot(scenario = new URLSearchParams(location.searc
   const syncState = scenario === 'loading' ? 'syncing' : scenario === 'error' ? 'error' : errors ? 'partial' : 'ready'
   return {
     revision: 1,
-    version: '0.3.0',
+    version: '0.3.1',
     syncState,
     syncMessage: scenario === 'loading' ? '正在同步节点小宝服务...' : scenario === 'error' ? '服务同步失败，请检查节点小宝登录状态' : errors ? '服务已同步，部分转发正在等待恢复' : '服务已同步',
     lastSyncedAt: scenario === 'loading' ? '' : new Date('2026-09-03T20:36:00+08:00').toISOString(),

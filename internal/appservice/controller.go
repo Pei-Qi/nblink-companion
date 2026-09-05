@@ -50,6 +50,7 @@ type Controller struct {
 	notifications map[string]notificationState
 	startupWarn   string
 	portAvailable func(int) bool
+	setAutostart  func(bool, string) error
 }
 
 func New(
@@ -68,7 +69,7 @@ func New(
 		logger: logger, store: store, provider: provider, supervisor: supervisor, platform: platform,
 		cfg: cfg, version: version, ctx: ctx, cancel: cancel, syncState: "idle",
 		syncMessage: "正在初始化", notifications: make(map[string]notificationState), startupWarn: startupWarning,
-		portAvailable: localPortAvailable,
+		portAvailable: localPortAvailable, setAutostart: autostart.Set,
 	}
 	supervisor.SetStatusHandler(controller.handleStatus)
 	var startOnce sync.Once
@@ -435,7 +436,7 @@ func (c *Controller) repairAutostart(enabled bool) {
 	}
 	executable, err := os.Executable()
 	if err == nil {
-		err = autostart.Set(true, executable)
+		err = c.setAutostart(true, executable)
 	}
 	if err != nil && c.logger != nil {
 		c.logger.Warn("repair autostart failed", "error", err)
